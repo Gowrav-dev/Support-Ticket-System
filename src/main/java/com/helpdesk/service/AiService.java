@@ -4,6 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -15,13 +18,14 @@ import java.util.Properties;
 /**
  * Service to classify the ticket and get solutions from the Groq LLM API.
  * 
- * Supports Groq API key from:
+ * Secure Key Resolution Order:
  * 1. Environment variable: GROQ_API_KEY
- * 2. System property: -DGROQ_API_KEY=...
- * 3. Configuration file: src/main/resources/application.properties (groq.api.key=...)
+ * 2. Local git-ignored .env file: GROQ_API_KEY=...
+ * 3. System property: -DGROQ_API_KEY=...
+ * 4. Configuration file: src/main/resources/application.properties (groq.api.key)
  * 
- * If no key is set or the network is unavailable, it uses an intelligent
- * rule-based local diagnosis engine so the application works seamlessly 100% of the time.
+ * If no key is set or the network is unavailable, it seamlessly uses an
+ * intelligent rule-based local diagnosis engine so the app remains 100% resilient.
  */
 public class AiService {
 
@@ -57,27 +61,65 @@ public class AiService {
         return generateLocalDiagnosis(title, description);
     }
 
-    private String resolveApiKey() {
-        // 1. Check environment variable: GROQ_API_KEY
+    public String resolveApiKey() {
+        // 1. Check system environment variable: GROQ_API_KEY
         String envKey = System.getenv("GROQ_API_KEY");
         if (envKey != null && !envKey.isBlank()) {
             return envKey.trim();
         }
 
-        // 2. Check system property: -DGROQ_API_KEY=...
+        // 2. Check local git-ignored .env file in the project root
+        String dotEnvKey = loadFromDotEnv();
+        if (dotEnvKey != null && !dotEnvKey.isBlank()) {
+            return dotEnvKey.trim();
+        }
+
+        // 3. Check system property: -DGROQ_API_KEY=...
         String propKey = System.getProperty("GROQ_API_KEY");
         if (propKey != null && !propKey.isBlank()) {
             return propKey.trim();
         }
 
-        // 3. Check application.properties: groq.api.key=...
+        // 4. Check application.properties: groq.api.key
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("application.properties")) {
             if (is != null) {
                 Properties props = new Properties();
                 props.load(is);
                 String fileKey = props.getProperty("groq.api.key");
-                if (fileKey != null && !fileKey.isBlank() && !fileKey.startsWith("your_") && !fileKey.equalsIgnoreCase("placeholder")) {
+                if (fileKey != null && !fileKey.isBlank() && !fileKey.startsWith("${") && !fileKey.startsWith("your_") && !fileKey.equalsIgnoreCase("placeholder")) {
                     return fileKey.trim();
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
+    /**
+     * Lightweight .env file parser using standard Core Java (no extra dependencies).
+     */
+    private String loadFromDotEnv() {
+        File dotEnv = new File(".env");
+        if (!dotEnv.exists() || !dotEnv.isFile()) {
+            return null;
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(dotEnv))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                if (line.startsWith("GROQ_API_KEY=")) {
+                    String value = line.substring("GROQ_API_KEY=".length()).trim();
+                    // Strip enclosing quotes if present
+                    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+                        value = value.substring(1, value.length() - 1);
+                    }
+                    if (!value.isBlank() && !value.equals("your_groq_api_key_here")) {
+                        return value;
+                    }
                 }
             }
         } catch (Exception ignored) {}

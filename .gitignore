@@ -4,6 +4,10 @@ target/
 # Log files
 *.log
 
+# Environment variables & secrets (NEVER commit actual API keys)
+.env
+*.env
+
 # IDE files
 .idea/
 *.iml

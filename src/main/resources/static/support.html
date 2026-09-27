@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support Staff Portal - AI IT Helpdesk</title>
+  
+  <!-- Strict Access Control: Only SUPPORT_STAFF permitted -->
+  <script>
+    (function() {
+      const role = localStorage.getItem('user_role');
+      const token = localStorage.getItem('auth_token');
+      if (!token || role !== 'SUPPORT_STAFF') {
+        alert('⛔ Access Denied: Only Support Staff members are authorized to access this page.');
+        window.location.replace('/login.html');
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <div class="nav-header">
+    <div class="brand">🛠️ AI IT Helpdesk &mdash; Support Staff Portal</div>
+    <div class="nav-links">
+      <a href="/support.html" class="active">Support Staff Portal</a>
+      <span id="user-display" class="nav-user">
+        <span>👤 <strong id="staff-name">Staff</strong> (<span style="color: #38bdf8;">Support Staff</span>)</span>
+        <button onclick="logout()" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 6px;">Logout</button>
+      </span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- Active Support Employee Banner -->
+    <div id="staff-banner" class="card" style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-left: 4px solid #2563eb; padding: 14px 20px; margin-bottom: 20px;">
+      <div>
+        <span style="font-size: 0.85rem; color: #64748b; text-transform: uppercase; font-weight: 600;">Active Support Staff</span>
+        <h3 id="banner-staff-name" style="margin-top: 2px; color: #1e293b;">Alex Rivera (Support Staff #1)</h3>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button onclick="switchStaff('alex_support', 'Alex Rivera')" class="btn btn-secondary btn-sm">Switch to Alex</button>
+        <button onclick="switchStaff('sarah_support', 'Sarah Chen')" class="btn btn-secondary btn-sm">Switch to Sarah</button>
+      </div>
+    </div>
+
+    <!-- Quick Statistics Grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div id="stat-total" class="stat-value">0</div>
+        <div class="stat-label">Total Tickets</div>
+      </div>
+      <div class="stat-card">
+        <div id="stat-open" class="stat-value" style="color: #dc2626;">0</div>
+        <div class="stat-label">Open</div>
+      </div>
+      <div class="stat-card">
+        <div id="stat-progress" class="stat-value" style="color: #d97706;">0</div>
+        <div class="stat-label">In Progress</div>
+      </div>
+      <div class="stat-card">
+        <div id="stat-my" class="stat-value" style="color: #2563eb;">0</div>
+        <div class="stat-label">Assigned to Me</div>
+      </div>
+    </div>
+
+    <!-- Tickets Management Card -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+        <h2>All Helpdesk Tickets</h2>
+        
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button id="filter-all" onclick="setFilter('ALL')" class="btn btn-primary btn-sm">All</button>
+          <button id="filter-mine" onclick="setFilter('MINE')" class="btn btn-secondary btn-sm">Assigned to Me</button>
+          <button id="filter-unassigned" onclick="setFilter('UNASSIGNED')" class="btn btn-secondary btn-sm">Unassigned</button>
+          <button onclick="loadTickets()" class="btn btn-secondary btn-sm" style="margin-left: 6px;">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Employee</th>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Assigned Support Staff</th>
+              <th>Action</th>
+              <th>View</th>
+            </tr>
+          </thead>
+          <tbody id="tickets-body">
+            <tr><td colspan="9" style="text-align: center; padding: 24px;">Loading tickets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentFilter = 'ALL';
+    let allTickets = [];
+
+    let currentStaffName = localStorage.getItem('full_name') || 'Alex Rivera';
+    let currentToken = localStorage.getItem('auth_token') || '';
+
+    function updateStaffUI() {
+      document.getElementById('staff-name').textContent = currentStaffName;
+      document.getElementById('banner-staff-name').textContent = `${currentStaffName} (Support Staff)`;
+    }
+
+    async function switchStaff(username, fullName) {
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password: 'Password@123' })
+        });
+        const data = await res.json();
+        if (data.success) {
+          localStorage.setItem('auth_token', data.data.token);
+          localStorage.setItem('full_name', data.data.user.fullName);
+          localStorage.setItem('user_name', data.data.user.username);
+          localStorage.setItem('user_role', data.data.user.role);
+          currentStaffName = data.data.user.fullName;
+          currentToken = data.data.token;
+          updateStaffUI();
+          loadTickets();
+        }
+      } catch (e) {
+        currentStaffName = fullName;
+        localStorage.setItem('full_name', fullName);
+        updateStaffUI();
+        loadTickets();
+      }
+    }
+
+    function logout() {
+      localStorage.clear();
+      window.location.href = '/login.html';
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+      document.getElementById('filter-all').className = filter === 'ALL' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      document.getElementById('filter-mine').className = filter === 'MINE' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      document.getElementById('filter-unassigned').className = filter === 'UNASSIGNED' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      renderTickets();
+    }
+
+    async function loadTickets() {
+      const tbody = document.getElementById('tickets-body');
+      try {
+        const headers = {};
+        if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
+        const res = await fetch('/api/tickets', { headers });
+        const json = await res.json();
+        allTickets = json.data || [];
+
+        // Update statistics
+        document.getElementById('stat-total').textContent = allTickets.length;
+        document.getElementById('stat-open').textContent = allTickets.filter(t => t.status === 'OPEN').length;
+        document.getElementById('stat-progress').textContent = allTickets.filter(t => t.status === 'IN_PROGRESS').length;
+        document.getElementById('stat-my').textContent = allTickets.filter(t => t.assignedTo === currentStaffName).length;
+
+        renderTickets();
+      } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: red;">Failed to load tickets. Backend may be offline.</td></tr>';
+      }
+    }
+
+    function renderTickets() {
+      const tbody = document.getElementById('tickets-body');
+
+      let filtered = allTickets;
+      if (currentFilter === 'MINE') {
+        filtered = allTickets.filter(t => t.assignedTo === currentStaffName);
+      } else if (currentFilter === 'UNASSIGNED') {
+        filtered = allTickets.filter(t => !t.assignedTo || t.assignedTo.trim() === '');
+      }
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 24px; color: #64748b;">No tickets found for filter "${currentFilter}".</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(t => {
+        const isAssignedToMe = t.assignedTo === currentStaffName;
+        const isUnassigned = !t.assignedTo || t.assignedTo.trim() === '';
+
+        let assignedBadge = '';
+        let actionBtn = '';
+
+        if (isUnassigned) {
+          assignedBadge = `<span class="badge badge-unassigned">Unassigned</span>`;
+          actionBtn = `<button onclick="pickTicket(${t.id})" class="btn btn-success btn-sm">✋ Pick &amp; Assign to Me</button>`;
+        } else if (isAssignedToMe) {
+          assignedBadge = `<span class="badge badge-assigned">👤 ${escapeHtml(t.assignedTo)} (You)</span>`;
+          actionBtn = `<span style="color: #059669; font-weight: 600; font-size: 0.82rem;">✓ Handling</span>`;
+        } else {
+          assignedBadge = `<span class="badge badge-assigned">👤 ${escapeHtml(t.assignedTo)}</span>`;
+          actionBtn = `<button onclick="pickTicket(${t.id})" class="btn btn-secondary btn-sm" title="Reassign ticket to yourself">Reassign to Me</button>`;
+        }
+
+        return `
+          <tr>
+            <td><strong>#${t.id}</strong></td>
+            <td><strong>${escapeHtml(t.userName)}</strong></td>
+            <td>${escapeHtml(t.title)}</td>
+            <td><span class="badge badge-cat">${t.category}</span></td>
+            <td><span class="badge badge-prio">${t.priority}</span></td>
+            <td>
+              <select onchange="updateStatus(${t.id}, this.value)" style="padding: 4px 6px; font-size: 0.8rem; border-radius: 4px; border: 1px solid #cbd5e1; font-weight: 600;">
+                <option value="OPEN" ${t.status === 'OPEN' ? 'selected' : ''}>OPEN</option>
+                <option value="IN_PROGRESS" ${t.status === 'IN_PROGRESS' ? 'selected' : ''}>IN PROGRESS</option>
+                <option value="RESOLVED" ${t.status === 'RESOLVED' ? 'selected' : ''}>RESOLVED</option>
+                <option value="CLOSED" ${t.status === 'CLOSED' ? 'selected' : ''}>CLOSED</option>
+              </select>
+            </td>
+            <td>${assignedBadge}</td>
+            <td>${actionBtn}</td>
+            <td>
+              <a href="/ticket-details.html?id=${t.id}" class="btn btn-secondary btn-sm">Details</a>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function pickTicket(ticketId) {
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
+
+        const res = await fetch(`/api/tickets/${ticketId}/assign`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ assignedTo: currentStaffName })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          loadTickets();
+        } else {
+          alert('Assignment failed: ' + (data.error || 'Access denied'));
+        }
+      } catch (err) {
+        alert('Failed to connect to backend server.');
+      }
+    }
+
+    async function updateStatus(ticketId, status) {
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
+
+        const res = await fetch(`/api/tickets/${ticketId}/status`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ status })
+        });
+        const json = await res.json();
+        if (json.success) {
+          loadTickets();
+        } else {
+          alert('Status update failed: ' + json.error);
+        }
+      } catch (e) {
+        alert('Server connection error');
+      }
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    updateStaffUI();
+    loadTickets();
+  </script>
+</body>
+</html>

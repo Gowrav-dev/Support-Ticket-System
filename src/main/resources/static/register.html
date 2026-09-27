@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register Account - AI IT Helpdesk</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <div class="nav-header">
+    <div class="brand">🤖 AI IT Helpdesk</div>
+    <div class="nav-links">
+      <a href="/index.html">User Portal</a>
+      <a href="/login.html">Login</a>
+      <a href="/register.html" class="active">Register</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 480px; margin-top: 40px;">
+    <div class="card">
+      <h2 style="margin-bottom: 6px; text-align: center;">Create an Account</h2>
+      <p style="color: #64748b; font-size: 0.9rem; text-align: center; margin-bottom: 24px;">
+        Register as a User or IT Support Staff member
+      </p>
+
+      <div id="alert-box" style="display: none; padding: 10px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px;"></div>
+
+      <form id="register-form">
+        <div class="form-group">
+          <label for="fullName">Full Name</label>
+          <input type="text" id="fullName" required placeholder="e.g. David Miller">
+        </div>
+
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" required placeholder="e.g. david_miller" autocomplete="username">
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required placeholder="At least 4 characters" minlength="4" autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label for="role">Account Role</label>
+          <select id="role" required>
+            <option value="USER">User (Employee / Student - Creates Tickets)</option>
+            <option value="SUPPORT_STAFF">Support Staff (IT Employee - Handles &amp; Resolves Tickets)</option>
+          </select>
+          <small style="color: #64748b; display: block; margin-top: 4px;">
+            Multiple support staff members can join to pick and resolve helpdesk tickets.
+          </small>
+        </div>
+
+        <button type="submit" id="reg-btn" class="btn btn-primary" style="width: 100%; padding: 11px; margin-top: 10px;">
+          Create Account
+        </button>
+      </form>
+
+      <div style="text-align: center; margin-top: 18px; font-size: 0.9rem;">
+        Already have an account? <a href="/login.html" style="color: #2563eb; font-weight: 600; text-decoration: none;">Log in here</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fullName = document.getElementById('fullName').value.trim();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const role = document.getElementById('role').value;
+      const alertBox = document.getElementById('alert-box');
+      const btn = document.getElementById('reg-btn');
+
+      alertBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Creating account...';
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fullName, username, password, role })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          alertBox.style.background = '#dcfce7';
+          alertBox.style.border = '1px solid #86efac';
+          alertBox.style.color = '#166534';
+          alertBox.textContent = `Account created successfully for ${fullName} (${role === 'SUPPORT_STAFF' ? 'Support Staff' : 'User'})! Redirecting to login...`;
+          alertBox.style.display = 'block';
+
+          setTimeout(() => {
+            window.location.href = '/login.html';
+          }, 1500);
+        } else {
+          alertBox.style.background = '#fee2e2';
+          alertBox.style.border = '1px solid #f87171';
+          alertBox.style.color = '#991b1b';
+          alertBox.textContent = data.error || 'Registration failed.';
+          alertBox.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Create Account';
+        }
+      } catch (err) {
+        alertBox.style.background = '#fee2e2';
+        alertBox.style.border = '1px solid #f87171';
+        alertBox.style.color = '#991b1b';
+        alertBox.textContent = 'Network or server error.';
+        alertBox.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
+      }
+    });
+  </script>
+</body>
+</html>

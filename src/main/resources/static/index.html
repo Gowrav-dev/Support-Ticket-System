@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Portal - AI IT Helpdesk</title>
+
+  <!-- Strict Access Control: Support Staff cannot enter User Portal -->
+  <script>
+    (function() {
+      const role = localStorage.getItem('user_role');
+      const token = localStorage.getItem('auth_token');
+      if (token && role === 'SUPPORT_STAFF') {
+        alert('⛔ Access Denied: Support Staff members cannot access the User Portal.');
+        window.location.replace('/support.html');
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <div class="nav-header">
+    <div class="brand">🤖 AI IT Helpdesk &mdash; User Portal</div>
+    <div class="nav-links">
+      <a href="/index.html" class="active">Submit Ticket</a>
+      <span id="user-display" class="nav-user" style="display: none;">
+        <span>👤 <strong id="logged-user-name">User</strong> (<span id="logged-user-role" style="color: #38bdf8;">User</span>)</span>
+        <button onclick="logout()" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.75rem; margin-left: 6px;">Logout</button>
+      </span>
+      <span id="guest-links">
+        <a href="/login.html">Login</a>
+        <a href="/register.html">Register</a>
+      </span>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 850px;">
+    
+    <!-- Submit Ticket Card -->
+    <div class="card">
+      <h2 style="margin-bottom: 6px;">Submit IT Support Ticket</h2>
+      <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">
+        Describe your technical issue. Our Groq AI engine will categorize, prioritize, and generate instant troubleshooting steps. A member of our Support Staff will pick and resolve your ticket.
+      </p>
+
+      <form id="ticket-form">
+        <div class="form-group">
+          <label for="userName">Your Full Name</label>
+          <input type="text" id="userName" required placeholder="e.g. John Doe">
+        </div>
+
+        <div class="form-group">
+          <label for="title">Issue Title</label>
+          <input type="text" id="title" required placeholder="e.g. Cannot connect to office VPN or Wi-Fi">
+        </div>
+
+        <div class="form-group">
+          <label for="description">Detailed Description</label>
+          <textarea id="description" rows="4" required placeholder="Describe what went wrong, error codes, software version, etc."></textarea>
+        </div>
+
+        <button type="submit" id="submit-btn" class="btn btn-primary" style="width: 100%; padding: 11px;">
+          🚀 Submit Ticket &amp; Get AI Diagnosis
+        </button>
+
+        <p id="loading-msg" style="display: none; text-align: center; color: #2563eb; font-weight: 600; margin-top: 15px;">
+          ⏳ Sending to Groq AI for instant analysis...
+        </p>
+      </form>
+    </div>
+
+    <!-- My Tickets Card -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>My Submitted Tickets</h3>
+        <button onclick="loadMyTickets()" class="btn btn-secondary btn-sm">🔄 Refresh</button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Assigned Support Staff</th>
+              <th>View</th>
+            </tr>
+          </thead>
+          <tbody id="my-tickets-body">
+            <tr><td colspan="7" style="text-align: center; padding: 20px; color: #64748b;">Loading tickets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const authToken = localStorage.getItem('auth_token');
+    const storedFullName = localStorage.getItem('full_name');
+    const storedRole = localStorage.getItem('user_role');
+
+    if (storedFullName) {
+      document.getElementById('userName').value = storedFullName;
+      document.getElementById('logged-user-name').textContent = storedFullName;
+      document.getElementById('logged-user-role').textContent = 'User';
+      document.getElementById('user-display').style.display = 'inline-flex';
+      document.getElementById('guest-links').style.display = 'none';
+    }
+
+    function logout() {
+      localStorage.clear();
+      window.location.reload();
+    }
+
+    // Submit ticket
+    document.getElementById('ticket-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const userName = document.getElementById('userName').value.trim();
+      const title = document.getElementById('title').value.trim();
+      const description = document.getElementById('description').value.trim();
+      const submitBtn = document.getElementById('submit-btn');
+      const loadingMsg = document.getElementById('loading-msg');
+
+      submitBtn.disabled = true;
+      loadingMsg.style.display = 'block';
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+        const res = await fetch('/api/tickets', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ userName, title, description })
+        });
+        const json = await res.json();
+
+        if (res.ok && json.success) {
+          window.location.href = `/ticket-details.html?id=${json.data.id}`;
+        } else {
+          alert('Error: ' + (json.error || 'Failed to submit ticket'));
+          submitBtn.disabled = false;
+          loadingMsg.style.display = 'none';
+        }
+      } catch (err) {
+        alert('Server connection error. Is the backend running?');
+        submitBtn.disabled = false;
+        loadingMsg.style.display = 'none';
+      }
+    });
+
+    // Load user's tickets
+    async function loadMyTickets() {
+      const tbody = document.getElementById('my-tickets-body');
+      try {
+        const headers = {};
+        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+        const res = await fetch('/api/tickets', { headers });
+        const json = await res.json();
+        const tickets = json.data || [];
+
+        if (tickets.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #64748b;">No tickets submitted yet. Fill out the form above to submit your first ticket!</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = tickets.map(t => {
+          let statusBadge = '<span class="badge badge-open">OPEN</span>';
+          if (t.status === 'PENDING_USER') statusBadge = '<span class="badge badge-cat">AI SOLUTION READY</span>';
+          else if (t.status === 'IN_PROGRESS') statusBadge = '<span class="badge badge-progress">IN PROGRESS</span>';
+          else if (t.status === 'RESOLVED') statusBadge = '<span class="badge badge-resolved">RESOLVED</span>';
+          else if (t.status === 'CLOSED') statusBadge = '<span class="badge badge-closed">CLOSED</span>';
+
+          let assignedStaff = t.assignedTo
+            ? `<span class="badge badge-assigned">👤 ${escapeHtml(t.assignedTo)}</span>`
+            : (t.status === 'PENDING_USER' 
+                ? `<span class="badge badge-unassigned">Awaiting your feedback</span>` 
+                : `<span class="badge badge-unassigned">⏳ Forwarded to Staff</span>`);
+
+          return `
+            <tr>
+              <td><strong>#${t.id}</strong></td>
+              <td>${escapeHtml(t.title)}</td>
+              <td><span class="badge badge-cat">${t.category}</span></td>
+              <td><span class="badge badge-prio">${t.priority}</span></td>
+              <td>${statusBadge}</td>
+              <td>${assignedStaff}</td>
+              <td>
+                <a href="/ticket-details.html?id=${t.id}" class="btn btn-secondary btn-sm">Details</a>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">Failed to load tickets.</td></tr>';
+      }
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    loadMyTickets();
+  </script>
+</body>
+</html>

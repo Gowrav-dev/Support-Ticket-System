@@ -16,18 +16,23 @@ import java.time.Duration;
 import java.util.Properties;
 
 /**
- * Service to classify the ticket and get solutions from the Groq LLM API.
+ * Service to classify tickets and generate troubleshooting steps from Groq LLM API.
  * 
- * Secure Key Resolution Order:
+ * Secure Key Resolution Priority:
  * 1. Environment variable: GROQ_API_KEY
- * 2. Local git-ignored .env file: GROQ_API_KEY=...
+ * 2. Local git-ignored .env file: GROQ_API_KEY=gsk_...
  * 3. System property: -DGROQ_API_KEY=...
  * 4. Configuration file: src/main/resources/application.properties (groq.api.key)
- * 
- * If no key is set or the network is unavailable, it seamlessly uses an
- * intelligent rule-based local diagnosis engine so the app remains 100% resilient.
  */
 public class AiService {
+
+    private static final String[] GROQ_MODELS = {
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.8-27b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant"
+    };
 
     public static class AiResult {
         public String category = "OTHER";
@@ -51,13 +56,15 @@ public class AiService {
         // If a Groq API key is configured, call the live Groq LLM API
         if (apiKey != null && !apiKey.isBlank()) {
             try {
-                return callGroqApi(title, description, apiKey.trim());
+                return callGroqApiWithFallback(title, description, apiKey.trim());
             } catch (Exception e) {
-                System.err.println("[AiService] Notice: Groq API call failed (" + e.getMessage() + "). Using local smart diagnosis.");
+                System.err.println("[AiService] Notice: Groq API call error: " + e.getMessage());
             }
+        } else {
+            System.out.println("[AiService] No Groq API key found. Using local smart diagnosis engine.");
         }
 
-        // Seamless local diagnosis fallback when no key is set or offline
+        // Seamless local diagnosis fallback when no key is set or API fails
         return generateLocalDiagnosis(title, description);
     }
 
@@ -96,7 +103,8 @@ public class AiService {
     }
 
     /**
-     * Lightweight .env file parser using standard Core Java (no extra dependencies).
+     * Robust, zero-dependency .env file parser.
+     * Handles UTF-8 BOM, comments, whitespace around '=', and quotes.
      */
     private String loadFromDotEnv() {
         File dotEnv = new File(".env");
@@ -108,87 +116,119 @@ public class AiService {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
+                if (line.startsWith("\uFEFF")) {
+                    line = line.substring(1).trim(); // Remove UTF-8 BOM
+                }
                 if (line.isEmpty() || line.startsWith("#")) {
                     continue;
                 }
-                if (line.startsWith("GROQ_API_KEY=")) {
-                    String value = line.substring("GROQ_API_KEY=".length()).trim();
-                    // Strip enclosing quotes if present
-                    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-                        value = value.substring(1, value.length() - 1);
-                    }
-                    if (!value.isBlank() && !value.equals("your_groq_api_key_here")) {
-                        return value;
+
+                int eqIdx = line.indexOf('=');
+                if (eqIdx > 0) {
+                    String key = line.substring(0, eqIdx).trim();
+                    String val = line.substring(eqIdx + 1).trim();
+
+                    if (key.equalsIgnoreCase("GROQ_API_KEY") || key.equalsIgnoreCase("GROQ_KEY")) {
+                        // Strip inline comments if any
+                        if (val.contains("#") && !val.startsWith("\"") && !val.startsWith("'")) {
+                            val = val.substring(0, val.indexOf('#')).trim();
+                        }
+                        // Strip enclosing single or double quotes
+                        if ((val.startsWith("\"") && val.endsWith("\"")) || (val.startsWith("'") && val.endsWith("'"))) {
+                            if (val.length() >= 2) {
+                                val = val.substring(1, val.length() - 1).trim();
+                            }
+                        }
+                        if (!val.isBlank() && !val.equalsIgnoreCase("your_groq_api_key_here") && !val.startsWith("your_")) {
+                            return val;
+                        }
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            System.err.println("[AiService] Could not read .env file: " + e.getMessage());
+        }
 
         return null;
     }
 
-    private AiResult callGroqApi(String title, String description, String apiKey) throws Exception {
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
+    private AiResult callGroqApiWithFallback(String title, String description, String apiKey) throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(8))
+                .build();
 
         String systemPrompt = """
-            You are an IT Support AI.
+            You are an expert IT Helpdesk Support AI.
             Analyze the user's issue and return ONLY a valid JSON object with these 4 keys:
             {
               "category": "NETWORK" or "HARDWARE" or "SOFTWARE" or "ACCOUNT" or "OTHER",
               "priority": "LOW" or "MEDIUM" or "HIGH",
-              "summary": "1 sentence technical summary",
-              "suggested_solution": "Numbered step-by-step troubleshooting instructions"
+              "summary": "1 sentence technical summary of the issue",
+              "suggested_solution": "Numbered step-by-step troubleshooting instructions tailored specifically to this issue"
             }
-            Do not include markdown ticks or text outside the JSON object.
+            Do not include any explanation or text outside the JSON object.
         """;
 
-        String userPrompt = "Title: " + title + "\nDescription: " + description;
+        String userPrompt = "Ticket Title: " + title + "\nTicket Description: " + description;
 
-        JsonObject body = new JsonObject();
-        body.addProperty("model", "llama-3.3-70b-versatile");
-        body.addProperty("temperature", 0.2);
+        for (String modelName : GROQ_MODELS) {
+            try {
+                JsonObject body = new JsonObject();
+                body.addProperty("model", modelName);
+                body.addProperty("temperature", 0.3);
 
-        JsonObject responseFormat = new JsonObject();
-        responseFormat.addProperty("type", "json_object");
-        body.add("response_format", responseFormat);
+                JsonObject responseFormat = new JsonObject();
+                responseFormat.addProperty("type", "json_object");
+                body.add("response_format", responseFormat);
 
-        JsonArray messages = new JsonArray();
-        JsonObject sys = new JsonObject();
-        sys.addProperty("role", "system");
-        sys.addProperty("content", systemPrompt);
-        messages.add(sys);
+                JsonArray messages = new JsonArray();
+                JsonObject sys = new JsonObject();
+                sys.addProperty("role", "system");
+                sys.addProperty("content", systemPrompt);
+                messages.add(sys);
 
-        JsonObject usr = new JsonObject();
-        usr.addProperty("role", "user");
-        usr.addProperty("content", userPrompt);
-        messages.add(usr);
+                JsonObject usr = new JsonObject();
+                usr.addProperty("role", "user");
+                usr.addProperty("content", userPrompt);
+                messages.add(usr);
 
-        body.add("messages", messages);
+                body.add("messages", messages);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.groq.com/openai/v1/chat/completions"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-                .build();
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create("https://api.groq.com/openai/v1/chat/completions"))
+                        .timeout(Duration.ofSeconds(12))
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", "Bearer " + apiKey)
+                        .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                        .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        if (response.statusCode() == 200) {
-            JsonObject respJson = JsonParser.parseString(response.body()).getAsJsonObject();
-            String content = respJson.getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
+                if (response.statusCode() == 200) {
+                    JsonObject respJson = JsonParser.parseString(response.body()).getAsJsonObject();
+                    String content = respJson.getAsJsonArray("choices")
+                            .get(0).getAsJsonObject()
+                            .getAsJsonObject("message")
+                            .get("content").getAsString();
 
-            JsonObject result = JsonParser.parseString(content).getAsJsonObject();
-            return new AiResult(
-                    result.has("category") ? result.get("category").getAsString().toUpperCase() : "OTHER",
-                    result.has("priority") ? result.get("priority").getAsString().toUpperCase() : "MEDIUM",
-                    result.has("summary") ? result.get("summary").getAsString() : "AI diagnostic summary generated.",
-                    result.has("suggested_solution") ? result.get("suggested_solution").getAsString() : "1. Restart application.\n2. Contact IT."
-            );
+                    JsonObject result = JsonParser.parseString(content).getAsJsonObject();
+                    System.out.println("[AiService] Live Groq AI analysis completed using [" + modelName + "] for: " + title);
+                    return new AiResult(
+                            result.has("category") ? result.get("category").getAsString().toUpperCase() : "OTHER",
+                            result.has("priority") ? result.get("priority").getAsString().toUpperCase() : "MEDIUM",
+                            result.has("summary") ? result.get("summary").getAsString() : "AI diagnostic summary generated.",
+                            result.has("suggested_solution") ? result.get("suggested_solution").getAsString() : "1. Restart application.\n2. Contact IT."
+                    );
+                } else if (response.statusCode() == 404) {
+                    // Model not found on this Groq tier, try next model
+                    System.err.println("[AiService] Model " + modelName + " not found (404), trying fallback model...");
+                } else {
+                    System.err.println("[AiService] Groq API returned HTTP " + response.statusCode() + ": " + response.body());
+                    break;
+                }
+            } catch (Exception e) {
+                System.err.println("[AiService] Attempt with " + modelName + " failed: " + e.getMessage());
+            }
         }
 
         return generateLocalDiagnosis(title, description);
@@ -211,14 +251,14 @@ public class AiService {
                     "Authentication or user access problem: " + title,
                     "1. Confirm user credentials and keyboard Caps Lock status.\n2. Use self-service password reset if active.\n3. Request IT Support Staff to unlock or refresh Active Directory account."
             );
-        } else if (text.contains("printer") || text.contains("monitor") || text.contains("screen") || text.contains("keyboard") || text.contains("mouse") || text.contains("hardware") || text.contains("laptop")) {
+        } else if (text.contains("printer") || text.contains("monitor") || text.contains("screen") || text.contains("keyboard") || text.contains("mouse") || text.contains("hardware") || text.contains("laptop") || text.contains("dell") || text.contains("display")) {
             return new AiResult(
                     "HARDWARE",
                     "MEDIUM",
                     "Peripheral or hardware device fault: " + title,
                     "1. Check physical cable connections (HDMI/USB/power).\n2. Disconnect and reconnect docking station.\n3. Update device drivers via Device Manager."
             );
-        } else if (text.contains("crash") || text.contains("error") || text.contains("outlook") || text.contains("excel") || text.contains("software") || text.contains("install") || text.contains("app")) {
+        } else if (text.contains("crash") || text.contains("error") || text.contains("outlook") || text.contains("excel") || text.contains("software") || text.contains("install") || text.contains("app") || text.contains("freeze")) {
             return new AiResult(
                     "SOFTWARE",
                     "MEDIUM",
